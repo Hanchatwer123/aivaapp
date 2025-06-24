@@ -55,3 +55,152 @@ for sent in sent_tokenize(outputs[0]["generated_text"]):
     print(sent)
 
 warnings.filterwarnings("ignore")
+
+import warnings
+from gtts import gTTS
+import numpy as np
+
+torch.cuda.is_available()
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"Using torch {torch.__version__} ({DEVICE})")
+
+import whisper
+model = whisper.load_model("medium", device=DEVICE)
+print(
+    f"Model is {'multilingual' if model.is_multilingual else 'English-only'} "
+    f"and has {sum(np.prod(p.shape) for p in model.parameters()):,} parameters."
+)
+
+import re
+
+input_text = 'What color is the microphone in image?'
+input_image = 'img.jpg'
+
+# load the image
+image = Image.open(input_image)
+
+# prompt_instructions = """
+# Describe the image using as much detail as possible, is it a painting, a photograph, what colors are predominant, what is the image about?
+# """
+
+# print(input_text)
+prompt_instructions = """
+Act as an expert in imagery descriptive analysis, using as much detail as possible from the image, respond to the following prompt:
+""" + input_text
+prompt = "USER: <image>\n" + prompt_instructions + "\nASSISTANT:"
+
+# print(prompt)
+
+outputs = pipe(image, prompt=prompt, generate_kwargs={"max_new_tokens": 200})
+
+match = re.search(r'ASSISTANT:\s*(.*)', outputs[0]["generated_text"])
+
+if match:
+    # Extract the text after "ASSISTANT:"
+    extracted_text = match.group(1)
+    print(extracted_text)
+else:
+    print("No match found.")
+
+for sent in sent_tokenize(outputs[0]["generated_text"]):
+    print(sent)
+
+import datetime
+import os
+
+## Logger file
+tstamp = datetime.datetime.now()
+tstamp = str(tstamp).replace(' ','_')
+logfile = f'{tstamp}_log.txt'
+def writehistory(text):
+    with open(logfile, 'a', encoding='utf-8') as f:
+        f.write(text)
+        f.write('\n')
+    f.close()
+
+import re
+import requests
+from PIL import Image
+
+def img2txt(input_text, input_image):
+
+    # load the image
+    image = Image.open(input_image)
+
+    writehistory(f"Input text: {input_text} - Type: {type(input_text)} - Dir: {dir(input_text)}")
+    if type(input_text) == tuple:
+        prompt_instructions = """
+        Describe the image using as much detail as possible, is it a painting, a photograph, what colors are predominant, what is the image about?
+        """
+    else:
+        prompt_instructions = """
+        Act as an expert in imagery descriptive analysis, using as much detail as possible from the image, respond to the following prompt:
+        """ + input_text
+
+    writehistory(f"prompt_instructions: {prompt_instructions}")
+    prompt = "USER: <image>\n" + prompt_instructions + "\nASSISTANT:"
+
+    outputs = pipe(image, prompt=prompt, generate_kwargs={"max_new_tokens": 200})
+
+    # Properly extract the response text
+    if outputs is not None and len(outputs[0]["generated_text"]) > 0:
+        match = re.search(r'ASSISTANT:\s*(.*)', outputs[0]["generated_text"])
+        if match:
+            # Extract the text after "ASSISTANT:"
+            reply = match.group(1)
+        else:
+            reply = "No response found."
+    else:
+        reply = "No response generated."
+
+    return reply
+
+def transcribe(audio):
+
+    # Check if the audio input is None or empty
+    if audio is None or audio == '':
+        return ('','',None)  # Return empty strings and None audio file
+
+    # language = 'en'
+
+    audio = whisper.load_audio(audio)
+    audio = whisper.pad_or_trim(audio)
+
+    mel = whisper.log_mel_spectrogram(audio).to(model.device)
+
+    _, probs = model.detect_language(mel)
+
+    options = whisper.DecodingOptions()
+    result = whisper.decode(model, mel, options)
+    result_text = result.text
+
+    return result_text
+
+def text_to_speech(text, file_path):
+    language = 'en'
+
+    audioobj = gTTS(text = text,
+                    lang = language,
+                    slow = False)
+
+    audioobj.save(file_path)
+
+    return file_path
+
+!ffmpeg -f lavfi -i anullsrc=r=44100:cl=mono -t 10 -q:a 9 -acodec libmp3lame Temp.mp3
+
+import gradio as gr
+import base64
+import os
+
+def process_inputs(audio_path, image_path):
+    speech_to_text_output = transcribe(audio_path)
+
+    if image_path:
+        chatgpt_output = img2txt(speech_to_text_output, image_path)
+    else:
+        chatgpt_output = "No image provided."
+
+    processed_audio_path = text_to_speech(chatgpt_output, "Temp3.mp3")
+
+    return speech_to_text_output, chatgpt_output, processed_audio_path
